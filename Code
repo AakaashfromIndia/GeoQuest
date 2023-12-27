@@ -1,0 +1,301 @@
+import pygame
+import sys
+import random
+import math
+import csv
+import pandas as pd
+from enum import Enum, auto
+
+WIDTH, HEIGHT = 896, 500
+FPS = 60
+
+CITIES_FILE = "Landmarks.csv"
+LEADERBOARD_FILE = "Leaderboard.xlsx"
+
+class MenuChoice(Enum):
+    START = auto()
+    LEADERBOARD = auto()
+    INSTRUCTIONS = auto()
+    EXIT = auto()
+
+def calculate_distance(point1, point2):
+    return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
+
+def display_popup(screen, city_name):
+    font = pygame.font.Font(None, 48)
+    text = font.render(city_name, True, (255, 255, 255))
+    text_rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+    pygame.draw.rect(screen, (0, 0, 255), (text_rect.x - 10, text_rect.y - 10, text_rect.width + 20, text_rect.height + 20))
+    screen.blit(text, text_rect.topleft)
+    pygame.display.flip()
+
+    waiting_for_right_click = True
+    while waiting_for_right_click:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
+                waiting_for_right_click = False
+
+    pygame.event.clear()
+
+def display_world_map(screen):
+    world_map = pygame.image.load("world_map.jpg")
+    screen.blit(world_map, (0, 0))
+
+def display_cities(screen, cities, marked_city=None, marked_point=None):
+    for city, coordinates in cities.items():
+        if city == marked_city:
+            pygame.draw.circle(screen, (255, 0, 0), coordinates, 5)         #Adjust point size if needed
+        else:
+            if len(coordinates) == 2:
+                rect = pygame.Rect(coordinates[0], coordinates[1], 1, 1)
+                pygame.draw.rect(screen, (255, 255, 255), rect)
+            else:
+                print(f"Error: Invalid coordinates for city {city} - {coordinates}")
+
+    if marked_point:
+        pygame.draw.circle(screen, (0, 0, 255), marked_point, 5)            #Adjust point size if needed
+
+def display_total_points(screen, total_points):
+    font = pygame.font.Font(None, 36)
+    points_text = font.render(f"Score: {total_points}", True, (0, 0, 0))
+    text_rect = points_text.get_rect(topright=(WIDTH - 10, 10))
+    screen.blit(points_text, text_rect.topleft)
+
+def read_cities_from_csv(file_path):
+    cities = {}
+    with open(file_path, mode='r') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            city_name = row['Landmark']
+            x = int(row['x'])
+            y = int(row['y'])
+            cities[city_name] = (x, y)
+    return cities
+
+def read_leaderboard_from_excel(file_path):
+    try:
+        leaderboard_df = pd.read_excel(file_path, engine='openpyxl')
+    except FileNotFoundError:
+        leaderboard_df = pd.DataFrame(columns=['ID', 'Name', 'Score'])
+    return leaderboard_df
+
+def update_leaderboard(leaderboard_df, total_points, player_name, player_id):
+    leaderboard_df = leaderboard_df.sort_values(by='Score', ascending=False)
+    new_row = {'ID': player_id, 'Name': player_name, 'Score': total_points}
+    new_row_df = pd.DataFrame([new_row])
+    leaderboard_df = pd.concat([leaderboard_df, new_row_df], ignore_index=True)
+    leaderboard_df.to_excel(LEADERBOARD_FILE, index=False)
+    return leaderboard_df
+
+def get_player_info():
+    print("\n\n")
+    player_name = input("Enter your name: ")
+    player_id = input("Enter your ID: ")
+    return player_name, player_id
+
+def display_main_menu(screen):
+    font = pygame.font.Font(None, 49)
+
+    start_button = pygame.Rect(338, 100, 220, 50)
+    start_text = font.render("Start Game", True, (255, 255, 255))
+    start_rect = start_text.get_rect(center=start_button.center)
+
+    leaderboard_button = pygame.Rect(338, 200, 220, 50)
+    leaderboard_text = font.render("Leaderboard", True, (255, 255, 255))
+    leaderboard_rect = leaderboard_text.get_rect(center=leaderboard_button.center)
+
+    instructions_button = pygame.Rect(338, 300, 220, 50)
+    instructions_text = font.render("Instructions", True, (255, 255, 255))
+    instructions_rect = instructions_text.get_rect(center=instructions_button.center)
+
+    exit_button = pygame.Rect(338, 400, 220, 50)
+    exit_text = font.render("Exit", True, (255, 255, 255))
+    exit_rect = exit_text.get_rect(center=exit_button.center)
+
+    menu_buttons = {
+        "start": (start_button, start_text, start_rect),
+        "leaderboard": (leaderboard_button, leaderboard_text, leaderboard_rect),
+        "instructions": (instructions_button, instructions_text, instructions_rect),
+        "exit": (exit_button, exit_text, exit_rect),
+    }
+
+    while True:
+        screen.fill((0, 0, 0))
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                for button, (rect, _, _) in menu_buttons.items():
+                    if rect.collidepoint(event.pos):
+                        return button
+
+        for button, (_, text_render, text_rect) in menu_buttons.items():
+            pygame.draw.rect(screen, (50, 50, 255), text_rect)
+            screen.blit(text_render, text_rect.topleft)
+
+        pygame.display.flip()
+
+class GameExitException(Exception):
+    pass
+
+def display_instructions(screen):
+    print("\n\nObjective: Your goal is to identify the location of various landmarks on the world map\nClick on the city or landmark on the map that you think corresponds to the given description")
+    print("\n\nInstructions:\n\t1) Click \"Start Game\" to begin your GeoQuest. \n\t2) Enter your name and ID when prompted.\n\t3) A random landmark would be shown to you. Right click to proceed with the location and mark your guess on the map during each round.\n\t4) After five rounds, you can see your total score")
+    print("\n\nScoring: Earn points based on the proximity of your guess to the actual location:\n\tWithin 50 pixels: 5 points\n\t50 to 100 pixels: 4 points\n\t100 to 150 pixels: 3 points\n\t150 to 200 pixels: 2 points\n\t200 to 250 pixels: 1 point\n\tBeyond 250 pixels: 0 points")
+    print("Compete for the highest score!\nCheck the leaderboard to see how you rank against other players.")
+    
+def display_leaderboard(screen):
+    leaderboard_df = read_leaderboard_from_excel(LEADERBOARD_FILE)
+    leaderboard_df = leaderboard_df.sort_values(by='Score', ascending=False)
+    print("\n\nLeaderboard:")
+    print(leaderboard_df[['ID', 'Name', 'Score']])
+
+def display_main_menu(screen):
+    font = pygame.font.Font(None, 49)
+
+    start_button = pygame.Rect(338, 100, 220, 50)
+    start_text = font.render("Start Game", True, (255, 255, 255))
+    start_rect = start_text.get_rect(center=start_button.center)
+
+    leaderboard_button = pygame.Rect(338, 200, 220, 50)
+    leaderboard_text = font.render("Leaderboard", True, (255, 255, 255))
+    leaderboard_rect = leaderboard_text.get_rect(center=leaderboard_button.center)
+
+    instructions_button = pygame.Rect(338, 300, 220, 50)
+    instructions_text = font.render("Instructions", True, (255, 255, 255))
+    instructions_rect = instructions_text.get_rect(center=instructions_button.center)
+
+    exit_button = pygame.Rect(338, 400, 220, 50)
+    exit_text = font.render("Exit", True, (255, 255, 255))
+    exit_rect = exit_text.get_rect(center=exit_button.center)
+
+    while True:
+        screen.fill((0, 0, 0))
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if start_button.collidepoint(event.pos):
+                    return "start"
+                elif leaderboard_button.collidepoint(event.pos):
+                    return "leaderboard"
+                elif instructions_button.collidepoint(event.pos):
+                    return "instructions"
+                elif exit_button.collidepoint(event.pos):
+                    pygame.quit()
+                    sys.exit()
+
+        pygame.draw.rect(screen, (50, 50, 255), start_button)
+        pygame.draw.rect(screen, (50, 50, 255), leaderboard_button)
+        pygame.draw.rect(screen, (50, 50, 255), instructions_button)
+        pygame.draw.rect(screen, (50, 50, 255), exit_button)
+
+        screen.blit(start_text, start_rect.topleft)
+        screen.blit(leaderboard_text, leaderboard_rect.topleft)
+        screen.blit(instructions_text, instructions_rect.topleft)
+        screen.blit(exit_text, exit_rect.topleft)
+
+        pygame.display.flip()
+
+def run_game():
+    pygame.init()
+
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("GeoQuest - Global")
+
+    clock = pygame.time.Clock()
+    current_screen = "menu"
+
+    while True:
+        if current_screen == "menu":
+            choice = display_main_menu(screen)
+            if choice == "start":
+                current_screen = "game"
+            elif choice == "instructions":
+                display_instructions(screen)
+            elif choice == "leaderboard":
+                display_leaderboard(screen)
+            elif choice == "exit":
+                pygame.quit()
+                raise GameExitException("Exiting the game")
+
+        elif current_screen == "game":
+            player_name, player_id = get_player_info()
+            cities = read_cities_from_csv(CITIES_FILE)
+            total_points = 0
+
+            for game_number in range(1, 6):
+                target_city, target_coordinates = random.choice(list(cities.items()))
+
+                display_popup(screen, target_city)
+
+                display_world_map(screen)
+                display_cities(screen, cities)
+
+                waiting_for_click = True
+                marked_point = None
+                while waiting_for_click:
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            pygame.quit()
+                            sys.exit()
+                        elif event.type == pygame.MOUSEBUTTONDOWN:
+                            marked_point = event.pos
+                            waiting_for_click = False
+
+                    display_world_map(screen)
+                    display_cities(screen, cities, marked_point=marked_point)
+                    display_total_points(screen, total_points)
+                    pygame.display.flip()
+                    clock.tick(FPS)
+
+                distance = calculate_distance(marked_point, target_coordinates)
+                if distance < 50:
+                    points = 5
+                elif distance < 100:
+                    points = 4
+                elif distance < 150:
+                    points = 3
+                elif distance < 200:
+                    points = 2
+                elif distance < 250:
+                    points = 1
+                else:
+                    points = 0
+
+                total_points += points
+
+                display_world_map(screen)
+                display_cities(screen, cities, marked_city=target_city, marked_point=marked_point)
+                display_total_points(screen, total_points)
+                pygame.display.flip()
+                pygame.time.delay(1500)
+
+            leaderboard_df = read_leaderboard_from_excel(LEADERBOARD_FILE)
+            leaderboard_df = update_leaderboard(leaderboard_df, total_points, player_name, player_id)
+
+            screen.fill((0, 0, 0))
+            font = pygame.font.Font(None, 72)
+            game_over_text = font.render("Game Over", True, (255, 0, 0))
+            game_over_rect = game_over_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
+            screen.blit(game_over_text, game_over_rect.topleft)
+
+            score_text = font.render(f"Total Points: {total_points}", True, (255, 255, 255))
+            score_rect = score_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 50))
+            screen.blit(score_text, score_rect.topleft)
+
+            pygame.display.flip()
+            pygame.time.delay(3000)
+
+            # Return to the main menu
+            current_screen = "menu"
+
+if __name__ == "__main__":
+    run_game()
